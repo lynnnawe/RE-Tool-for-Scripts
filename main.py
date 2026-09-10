@@ -15,7 +15,7 @@ SERVERDIR = os.path.join(HERE, "servers")
 
 
 def find_binary(name):
-    for base in (HERE, os.path.dirname(HERE), os.path.join(os.path.expanduser("~"), "Downloads")):
+    for base in (os.path.join(HERE, "bin"), HERE, os.path.dirname(HERE), os.path.join(os.path.expanduser("~"), "Downloads")):
         p = os.path.join(base, name)
         if os.path.isfile(p):
             return p
