@@ -23,15 +23,15 @@ hookfunction/replaceclosure/detour, getgc/get_gc_objects,
 setreadonly/make_writeable, WebSocket/syn.websocket, and more). Local runs let
 you optionally prepend a loader file, then the chosen prelude, then your target
 
+## Deobfuscator
+
+- Wearedevs
+- MoonsecV3
+- luarmor next trusttrusttrust
+  
 ## Config fields
 
 - Target script: the file under analysis
 - Optional loader/prelude to prepend (local runs)
 - script_key / Live loader URL: for instrument live mode
 - run secs / out dir: capture window and executor output folder
-
-- ## Deobfuscator
-
-- Wearedevs
-- MoonsecV3
-- luarmor next trusttrusttrust
