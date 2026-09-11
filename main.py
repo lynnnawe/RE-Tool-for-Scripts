@@ -12,10 +12,17 @@ OWNER = "Lyn"
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODDIR = os.path.join(HERE, "modules")
 SERVERDIR = os.path.join(HERE, "servers")
+OUTPUT_DIR = os.path.join(HERE, "output")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+PYCACHE_DIR = os.path.join(HERE, "__pycache__")
+sys.pycache_prefix = PYCACHE_DIR
+os.environ["PYTHONPYCACHEPREFIX"] = PYCACHE_DIR
 
 
 def find_binary(name):
-    for base in (os.path.join(HERE, "bin"), HERE, os.path.dirname(HERE), os.path.join(os.path.expanduser("~"), "Downloads")):
+    for base in (os.path.join(HERE, "bin", "luau"), os.path.join(HERE, "bin"), HERE,
+                 os.path.dirname(HERE), os.path.join(os.path.expanduser("~"), "Downloads")):
         p = os.path.join(base, name)
         if os.path.isfile(p):
             return p
@@ -26,6 +33,12 @@ LUAU = find_binary("luau.exe")
 LUAU_ANALYZE = find_binary("luau-analyze.exe")
 LUAU_AST = find_binary("luau-ast.exe")
 LUAU_COMPILE = find_binary("luau-compile.exe")
+
+PYENGINE_DIR = os.path.join(HERE, "pyengine")
+PYENGINE_DEOBFUSCATOR = os.path.join(PYENGINE_DIR, "deobfuscator.py")
+
+PYENGINE_MOONSEC_DIR = os.path.join(HERE, "pyengine_moonsec")
+PYENGINE_MOONSEC_DEOBFUSCATOR = os.path.join(PYENGINE_MOONSEC_DIR, "moonsec_deobfuscator.py")
 
 BG = "#f0efec"
 FIELD = "#ffffff"
@@ -133,9 +146,31 @@ class App:
         body = tk.Frame(self.root, bg=BG)
         body.pack(fill="both", expand=True, padx=18, pady=(6, 16))
 
-        left = tk.Frame(body, width=228, bg=BG)
-        left.pack(side="left", fill="y")
-        left.pack_propagate(False)
+        left_shell = tk.Frame(body, width=228, bg=BG)
+        left_shell.pack(side="left", fill="y")
+        left_shell.pack_propagate(False)
+
+        left_canvas = tk.Canvas(left_shell, bg=BG, highlightthickness=0)
+        left_scroll = tk.Scrollbar(left_shell, orient="vertical", command=left_canvas.yview)
+        left_canvas.configure(yscrollcommand=left_scroll.set)
+        left_canvas.pack(side="left", fill="both", expand=True)
+        left_scroll.pack(side="right", fill="y")
+
+        left = tk.Frame(left_canvas, bg=BG)
+        left_window = left_canvas.create_window((0, 0), window=left, anchor="nw")
+
+        def _left_configure(_e):
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+        left.bind("<Configure>", _left_configure)
+
+        def _canvas_configure(e):
+            left_canvas.itemconfig(left_window, width=e.width)
+        left_canvas.bind("<Configure>", _canvas_configure)
+
+        def _mousewheel(e):
+            left_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        left_canvas.bind("<Enter>", lambda e: left_canvas.bind_all("<MouseWheel>", _mousewheel))
+        left_canvas.bind("<Leave>", lambda e: left_canvas.unbind_all("<MouseWheel>"))
 
         self._group(left, "local", [
             ("run link in executor vm", self.act_execenv),
@@ -158,6 +193,10 @@ class App:
             ("fuzz server", lambda: self.spawn_console([sys.executable, os.path.join(SERVERDIR, "fuzz_server.py")])),
             ("header echo", lambda: self.spawn_console([sys.executable, os.path.join(SERVERDIR, "header_echo.py")])),
             ("netwatch", lambda: self.spawn_console(["powershell", "-ExecutionPolicy", "Bypass", "-File", os.path.join(SERVERDIR, "netwatch.ps1")])),
+        ])
+        self._group(left, "deobfuscate", [
+            ("wearedevs", self.act_wearedevs),
+            ("moonsecv3", self.act_moonsecv3),
         ])
         tk.Frame(left, bg=BG, height=8).pack(fill="x")
         self._btn(left, "stop", self.stop_proc, danger=True)
@@ -330,7 +369,7 @@ class App:
                 parts.append(f.read())
         parts.append(read_module(prelude_module))
         parts.append(src)
-        runner = os.path.join(HERE, "_runner.luau")
+        runner = os.path.join(OUTPUT_DIR, "_runner.luau")
         with open(runner, "w", encoding="utf-8", newline="") as f:
             f.write("\n".join(parts))
         return runner
@@ -378,7 +417,7 @@ class App:
     def run_static(self, binary, label, extra=None):
         p = self.target.get().strip()
         if not p or not os.path.isfile(p):
-            messagebox.showwarning("multitool", "select a target script first")
+            messagebox.showwarning("re script tool", "select a target script first")
             return
         cmd = [binary] + (extra or []) + [p]
         self.log(label + " ...")
@@ -407,6 +446,77 @@ class App:
     def act_compile(self):
         self.run_static(LUAU_COMPILE, "compile bytecode", extra=["-O2"])
 
+    def act_wearedevs(self):
+        text = self.target_text()
+        if not text:
+            messagebox.showwarning("re script tool", "give me a target first")
+            return
+
+        if os.path.isfile(text):
+            path = text
+        else:
+            src = self.get_target_source(required=True)
+            if src is None:
+                return
+            path = os.path.join(OUTPUT_DIR, "_wearedevs_target.lua")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(src)
+
+        self.log("deobfuscating target (wearedevs) ...")
+        threading.Thread(target=self._run_deobfuscator, args=(path, PYENGINE_DEOBFUSCATOR, PYENGINE_DIR,
+                                                               "Prometheus/WeAreDevs-style"), daemon=True).start()
+
+    def act_moonsecv3(self):
+        text = self.target_text()
+        if not text:
+            messagebox.showwarning("re script tool", "give me a target first")
+            return
+
+        if os.path.isfile(text):
+            path = text
+        else:
+            src = self.get_target_source(required=True)
+            if src is None:
+                return
+            path = os.path.join(OUTPUT_DIR, "_moonsecv3_target.lua")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(src)
+
+        self.log("deobfuscating target (moonsecv3) ...")
+        threading.Thread(target=self._run_deobfuscator, args=(path, PYENGINE_MOONSEC_DEOBFUSCATOR,
+                                                               PYENGINE_MOONSEC_DIR, "MoonSecV3"), daemon=True).start()
+
+    def _run_deobfuscator(self, path, engine_script, engine_cwd, label):
+        cmd = [sys.executable, engine_script, path, OUTPUT_DIR]
+        try:
+            self.proc = subprocess.Popen(cmd, cwd=engine_cwd, stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
+        except Exception as e:
+            self.q.put("could not launch deobfuscator: " + str(e))
+            return
+        for line in self.proc.stdout:
+            self.q.put(line.rstrip("\n"))
+        self.proc.wait()
+        self.proc = None
+
+        base = os.path.join(OUTPUT_DIR, os.path.basename(path))
+        deobf_path = base + ".deobf.lua"
+        report_path = base + ".report.txt"
+        self.q.put("")
+        if os.path.isfile(deobf_path):
+            self.q.put("deobfuscated output: " + deobf_path)
+            if os.path.isfile(report_path):
+                self.q.put("full trace report: " + report_path)
+            try:
+                os.startfile(deobf_path)
+            except Exception:
+                pass
+        else:
+            self.q.put("no .deobf.lua produced - see log above "
+                        f"(this engine targets {label} obfuscation)")
+        self.q.put("done")
+        self.q.put("")
+
     def spawn_console(self, cmd):
         flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
         try:
@@ -418,7 +528,7 @@ class App:
 
 def gate(root):
     return messagebox.askyesno(
-        "multitool",
+        "re script tool",
         "Are you the owner of, or authorized to analyze, the script you're\n"
         "about to work on?",
         parent=root)
