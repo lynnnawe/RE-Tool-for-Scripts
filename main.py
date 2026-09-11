@@ -138,6 +138,7 @@ class App:
         left.pack_propagate(False)
 
         self._group(left, "local", [
+            ("run link in executor vm", self.act_execenv),
             ("deobfuscate / vm dump", self.act_deob),
             ("emulate roblox", self.act_emulate),
             ("behavioural trace", self.act_behave),
@@ -361,6 +362,9 @@ class App:
         if self.proc and self.proc.poll() is None:
             self.proc.kill()
             self.log("stopped")
+
+    def act_execenv(self):
+        self.run_local("execenv.luau", "executor vm")
 
     def act_deob(self):
         self.run_local("deob_prelude.luau", "deobfuscate")
