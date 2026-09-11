@@ -1,4 +1,4 @@
-# Lyn Debug Tool
+# Lyn's Debugging Tool
 
 Ultimate debugging / analysis tool for Roblox scripts made by Lyn <3
 
