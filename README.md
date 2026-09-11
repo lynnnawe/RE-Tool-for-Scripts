@@ -29,3 +29,9 @@ you optionally prepend a loader file, then the chosen prelude, then your target
 - Optional loader/prelude to prepend (local runs)
 - script_key / Live loader URL: for instrument live mode
 - run secs / out dir: capture window and executor output folder
+
+- ## Deobfuscator
+
+- Wearedevs
+- MoonsecV3
+- luarmor next trusttrusttrust
