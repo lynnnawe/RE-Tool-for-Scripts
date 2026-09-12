@@ -4,6 +4,8 @@ local DUMP_BUFFERS = true
 local MIN_PRINTABLE = 0.75
 local MAX_LEN = 8192
 local TIME_BUDGET = 90
+local MAX_HEX_BYTES = 4096
+local MIN_BUFFER_LEN = 64
 
 local real_string, real_table = string, table
 local real_print, real_type, real_tostring = print, type, tostring
@@ -86,17 +88,30 @@ local hooked_table = {}
 for k, v in pairs(real_table) do hooked_table[k] = v end
 hooked_table.concat = wrap1(real_table.concat, "concat")
 
-local dumped_buf, nbufs = {}, 0
+local dumped_buf, nbufs, skipped_small = {}, 0, 0
 local function hexdump(b)
 	if not DUMP_BUFFERS or dumped_buf[b] then return end
 	dumped_buf[b] = true
-	nbufs += 1
 	local ok, s = pcall(buffer.tostring, b)
 	if not ok then return end
+	if #s < MIN_BUFFER_LEN then
+
+
+		skipped_small += 1
+		if skipped_small % 2000 == 0 then
+			real_print(sformat("[+] skipped %d tiny (<%d byte) scratch buffers so far", skipped_small, MIN_BUFFER_LEN))
+		end
+		return
+	end
+	nbufs += 1
 	real_print(sformat("[BUF %d] length=%d", nbufs, #s))
-	for i = 1, #s, 64 do
+	local hexcap = (#s < MAX_HEX_BYTES) and #s or MAX_HEX_BYTES
+	for i = 1, hexcap, 64 do
 		local chunk = ssub(s, i, i + 63)
 		real_print(sformat("[HEX %d %08d] %s", nbufs, i - 1, (sgsub(chunk, ".", function(c) return sformat("%02x", sbyte(c)) end))))
+	end
+	if #s > MAX_HEX_BYTES then
+		real_print(sformat("[HEX %d] ...<%d more bytes not dumped>", nbufs, #s - MAX_HEX_BYTES))
 	end
 	real_print(sformat("[BUF %d END]", nbufs))
 	real_print(PAD)
@@ -121,9 +136,11 @@ local function hook_loader(fn, name)
 		if real_type(chunk) == "string" then
 			real_print(srep("=", 70))
 			real_print(sformat("[%s] payload, %d bytes:", name, #chunk))
-			real_print(chunk)
+			for i = 1, #chunk, MAX_LEN do
+				real_print(ssub(chunk, i, i + MAX_LEN - 1))
+			end
 			real_print(srep("=", 70))
-			captured[#captured + 1] = sformat("[%s] payload, %d bytes:\n%s", name, #chunk, chunk)
+			captured[#captured + 1] = sformat("[%s] payload, %d bytes (chunked above)", name, #chunk)
 		end
 		return fn(chunk, ...)
 	end

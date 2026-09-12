@@ -40,6 +40,10 @@ PYENGINE_DEOBFUSCATOR = os.path.join(PYENGINE_DIR, "deobfuscator.py")
 PYENGINE_MOONSEC_DIR = os.path.join(HERE, "pyengine_moonsec")
 PYENGINE_MOONSEC_DEOBFUSCATOR = os.path.join(PYENGINE_MOONSEC_DIR, "moonsec_deobfuscator.py")
 
+PYENGINE_LURAPH_DIR = os.path.join(HERE, "pyengine_luraph")
+PYENGINE_LURAPH_DEOBFUSCATOR = os.path.join(PYENGINE_LURAPH_DIR, "luraph_deobfuscator.py")
+PYENGINE_LURAPH_UNFLATTEN = os.path.join(PYENGINE_LURAPH_DIR, "luraph_unflatten.py")
+
 BG = "#f0efec"
 FIELD = "#ffffff"
 FG = "#242422"
@@ -116,6 +120,8 @@ class App:
         self.live_url = tk.StringVar()
         self.run_seconds = tk.StringVar(value="90")
         self.outdir = tk.StringVar(value="lyn_debug")
+        self.exec_name = tk.StringVar(value="Synapse X")
+        self.exec_agent = tk.StringVar(value="2.0.0")
 
         cfg = tk.Frame(self.root, bg=BG)
         cfg.pack(fill="x", padx=18, pady=(12, 6))
@@ -142,6 +148,21 @@ class App:
         self._entry(r, self.run_seconds, width=6).pack(side="left")
         tk.Label(r, text="out", bg=BG, fg=MUTE, font=SMALLFONT).pack(side="left", padx=(12, 4))
         self._entry(r, self.outdir, width=14).pack(side="left")
+
+        er = tk.Frame(cfg, bg=BG)
+        er.pack(fill="x", pady=3)
+        tk.Label(er, text="exec name", width=8, anchor="w", bg=BG, fg=MUTE, font=SMALLFONT).pack(side="left")
+        self._entry(er, self.exec_name, width=14).pack(side="left")
+        tk.Label(er, text="agent", bg=BG, fg=MUTE, font=SMALLFONT).pack(side="left", padx=(12, 4))
+        self._entry(er, self.exec_agent, width=14).pack(side="left")
+        tk.Label(er, text="(emulate roblox: fake identity + User-Agent when fetching url)", bg=BG, fg=MUTE,
+                 font=SMALLFONT).pack(side="left", padx=(12, 0))
+
+        prog = tk.Frame(self.root, bg=BG)
+        prog.pack(fill="x", padx=18, pady=(0, 4))
+        self.progress_text = tk.StringVar(value="")
+        tk.Label(prog, textvariable=self.progress_text, bg=BG, fg=MUTE, font=SMALLFONT).pack(side="left")
+        self.progress_bar = ttk.Progressbar(prog, mode="indeterminate", length=160)
 
         body = tk.Frame(self.root, bg=BG)
         body.pack(fill="both", expand=True, padx=18, pady=(6, 16))
@@ -197,6 +218,8 @@ class App:
         self._group(left, "deobfuscate", [
             ("wearedevs", self.act_wearedevs),
             ("moonsecv3", self.act_moonsecv3),
+            ("luraph", self.act_luraph),
+            ("luraph (cleaned)", self.act_luraph_cleaned),
         ])
         tk.Frame(left, bg=BG, height=8).pack(fill="x")
         self._btn(left, "stop", self.stop_proc, danger=True)
@@ -281,23 +304,54 @@ class App:
         for label, cmd in items:
             self._btn(parent, label, cmd)
 
+    LOG_LINE_CAP = 20000
+    PUMP_BATCH = 300
+    STOP_BUSY = "\x00STOP_BUSY\x00"
+
+    def start_busy(self, label):
+        self.busy = True
+        self.progress_text.set(label)
+        self.progress_bar.pack(side="right")
+        self.progress_bar.start(12)
+
+    def stop_busy(self):
+        if not getattr(self, "busy", False):
+            return
+        self.busy = False
+        self.progress_bar.stop()
+        self.progress_bar.pack_forget()
+        self.progress_text.set("")
+
+    MAX_LOG_MSG_LEN = 4000
+
     def log(self, s=""):
-        self.out.insert("end", str(s) + "\n")
+        s = str(s)
+        if len(s) > self.MAX_LOG_MSG_LEN:
+            s = s[:self.MAX_LOG_MSG_LEN] + f"...<truncated, {len(s)} chars total -- see the saved report/output file for the rest>"
+        self.out.insert("end", s + "\n")
+        if int(self.out.index("end-1c").split(".")[0]) > self.LOG_LINE_CAP:
+            self.out.delete("1.0", "%d.0" % (self.LOG_LINE_CAP // 4))
         self.out.see("end")
 
     def clear(self):
         self.out.delete("1.0", "end")
 
     def _pump(self):
+        drained = 0
         try:
-            while True:
-                self.log(self.q.get_nowait())
+            while drained < self.PUMP_BATCH:
+                item = self.q.get_nowait()
+                if item == self.STOP_BUSY:
+                    self.stop_busy()
+                else:
+                    self.log(item)
+                drained += 1
         except queue.Empty:
             pass
-        self.root.after(80, self._pump)
+        self.root.after(5 if drained == self.PUMP_BATCH else 80, self._pump)
 
-    def fetch_url(self, url):
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    def fetch_url(self, url, user_agent="Mozilla/5.0"):
+        req = urllib.request.Request(url, headers={"User-Agent": user_agent})
         with urllib.request.urlopen(req, timeout=20) as r:
             return r.read().decode("utf-8", "replace")
 
@@ -358,8 +412,9 @@ class App:
             self.log("  hooks only; run the target script after pasting")
         self.log("")
 
-    def build_local_runner(self, prelude_module):
-        src = self.get_target_source()
+    def build_local_runner(self, prelude_module, src=None):
+        if src is None:
+            src = self.get_target_source()
         if src is None:
             return None
         parts = []
@@ -374,33 +429,53 @@ class App:
             f.write("\n".join(parts))
         return runner
 
-    def run_local(self, prelude_module, label):
-        runner = self.build_local_runner(prelude_module)
+    def run_local(self, prelude_module, label, save_as=None, src=None, busy_label=None):
+        runner = self.build_local_runner(prelude_module, src=src)
         if not runner:
             return
         self.log(label + " ...")
-        threading.Thread(target=self._run_luau, args=(runner,), daemon=True).start()
+        if busy_label:
+            self.start_busy(busy_label)
+        threading.Thread(target=self._run_luau, args=(runner, save_as), daemon=True).start()
 
-    def _run_luau(self, runner):
+    def _run_luau(self, runner, save_as=None):
         try:
             self.proc = subprocess.Popen([LUAU, runner], stdout=subprocess.PIPE,
-                                         stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
+                                         stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1,
+                                         cwd=OUTPUT_DIR)
         except Exception as e:
             self.q.put("could not launch luau.exe: " + str(e))
+            self.q.put(self.STOP_BUSY)
             return
+        kept = [] if save_as else None
         for line in self.proc.stdout:
             if line.startswith("[dump-pad]"):
                 continue
-            self.q.put(line.rstrip("\n"))
+            line = line.rstrip("\n")
+            self.q.put(line)
+            if kept is not None:
+                kept.append(line)
         self.proc.wait()
+        self.proc = None
+        if kept is not None:
+            report_path = os.path.join(OUTPUT_DIR, save_as)
+            with open(report_path, "w", encoding="utf-8", newline="") as f:
+                f.write("\n".join(kept))
+            self.q.put("")
+            self.q.put("report saved: " + report_path)
+            try:
+                os.startfile(report_path)
+            except Exception:
+                pass
         self.q.put("done")
         self.q.put("")
-        self.proc = None
+        self.q.put(self.STOP_BUSY)
 
     def stop_proc(self):
         if self.proc and self.proc.poll() is None:
             self.proc.kill()
             self.log("stopped")
+        self.stop_busy()
 
     def act_execenv(self):
         self.run_local("execenv.luau", "executor vm")
@@ -409,7 +484,37 @@ class App:
         self.run_local("deob_prelude.luau", "deobfuscate")
 
     def act_emulate(self):
-        self.run_local("emulate.luau", "emulate roblox")
+        live_url = self.live_url.get().strip()
+        if live_url:
+            ua = self.exec_agent.get().strip() or self.exec_name.get().strip() or "Synapse X"
+            self.log("fetching " + live_url + '  (User-Agent: "%s")' % ua)
+            try:
+                src = self.fetch_url(live_url, user_agent=ua)
+            except Exception as e:
+                self.log("fetch failed: " + str(e))
+                return
+        else:
+            src = self.get_target_source()
+            if src is None:
+                return
+
+        header = ('local EXECUTOR_NAME = ' + lua_str(self.exec_name.get().strip() or "Synapse X") + "\n"
+                   + 'local EXECUTOR_AGENT = ' + lua_str(self.exec_agent.get().strip() or "2.0.0") + "\n")
+        parts = [header]
+        loader = self.loader.get().strip()
+        if loader and os.path.isfile(loader):
+            with open(loader, encoding="utf-8", errors="replace") as f:
+                parts.append(f.read())
+        parts.append(read_module("emulate.luau"))
+        parts.append(src)
+        runner = os.path.join(OUTPUT_DIR, "_runner.luau")
+        with open(runner, "w", encoding="utf-8", newline="") as f:
+            f.write("\n".join(parts))
+
+        self.log("emulate roblox ...")
+        self.log("  executor identity: %s / %s" % (self.exec_name.get().strip() or "Synapse X",
+                                                     self.exec_agent.get().strip() or "2.0.0"))
+        threading.Thread(target=self._run_luau, args=(runner,), daemon=True).start()
 
     def act_behave(self):
         self.run_local("behave.luau", "behavioural trace")
@@ -463,6 +568,7 @@ class App:
                 f.write(src)
 
         self.log("deobfuscating target (wearedevs) ...")
+        self.start_busy("wearedevs deobfuscator running...")
         threading.Thread(target=self._run_deobfuscator, args=(path, PYENGINE_DEOBFUSCATOR, PYENGINE_DIR,
                                                                "Prometheus/WeAreDevs-style"), daemon=True).start()
 
@@ -483,8 +589,110 @@ class App:
                 f.write(src)
 
         self.log("deobfuscating target (moonsecv3) ...")
+        self.start_busy("moonsecv3 deobfuscator running...")
         threading.Thread(target=self._run_deobfuscator, args=(path, PYENGINE_MOONSEC_DEOBFUSCATOR,
                                                                PYENGINE_MOONSEC_DIR, "MoonSecV3"), daemon=True).start()
+
+    def act_luraph(self):
+        text = self.target_text()
+        if not text:
+            messagebox.showwarning("re script tool", "give me a target first")
+            return
+
+        if os.path.isfile(text):
+            path = text
+        else:
+            src = self.get_target_source(required=True)
+            if src is None:
+                return
+            path = os.path.join(OUTPUT_DIR, "_luraph_target.lua")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(src)
+
+        self.log("deobfuscating target (luraph) ...")
+        self.log("traces real game/API/global/loadstring activity under a sandboxed Luau env "
+                  "and reconstructs it as pseudo-Lua, same technique as moonsecv3 -- pure "
+                  "internal VM computation that never touches something observable stays "
+                  "invisible, and a nested loadstring'd wrapper gets saved as its own "
+                  ".stageN.lua for you to re-run this on, one layer at a time.")
+        self.start_busy("luraph deobfuscator running...")
+        threading.Thread(target=self._run_deobfuscator, args=(path, PYENGINE_LURAPH_DEOBFUSCATOR,
+                                                               PYENGINE_LURAPH_DIR, "Luraph"), daemon=True).start()
+
+    def act_luraph_cleaned(self):
+        text = self.target_text()
+        if not text:
+            messagebox.showwarning("re script tool", "give me a target first")
+            return
+
+        if os.path.isfile(text):
+            path = text
+        else:
+            src = self.get_target_source(required=True)
+            if src is None:
+                return
+            path = os.path.join(OUTPUT_DIR, "_luraph_target.lua")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(src)
+
+        base = os.path.basename(path)
+        stage_re = re.compile(r"^" + re.escape(base) + r"\.stage\d+\.lua$")
+        stage_paths = []
+        try:
+            for fname in sorted(os.listdir(OUTPUT_DIR)):
+                if stage_re.match(fname):
+                    stage_paths.append(os.path.join(OUTPUT_DIR, fname))
+        except OSError:
+            pass
+        queue = [path] + stage_paths
+
+        self.log("un-flattening target (luraph cleaned) ...")
+        if stage_paths:
+            self.log(f"also found {len(stage_paths)} already-extracted stage file(s) from a prior "
+                      f"'luraph' run -- cleaning those too: " + ", ".join(os.path.basename(p) for p in stage_paths))
+        self.log("a purely static, no-execution pass: finds `while true do <numeric-state "
+                  "dispatch> end` control-flow-flattening (Luraph's own outer loader uses this, "
+                  "and so do plenty of its unpacked stages) and mechanically converts it into a "
+                  "table of small named functions driven by one real while-loop, instead of the "
+                  "deeply nested if-chain. Verified byte-for-byte identical behavior against a "
+                  "real sample before this was wired in here. This does NOT recover original "
+                  "names/comments (permanently gone) and can't touch a custom byte-level VM "
+                  "(that's the OTHER kind of Luraph obfuscation, not this one). Any matching "
+                  ".keymap.txt from a prior 'luraph' run gets merged in too.")
+        self.start_busy("un-flattening...")
+        threading.Thread(target=self._run_unflatten, args=(queue,), daemon=True).start()
+
+    def _run_unflatten(self, paths):
+        last_out_path = None
+        for path in paths:
+            out_path = os.path.join(OUTPUT_DIR, os.path.basename(path) + ".cleaned.lua")
+            cmd = [sys.executable, PYENGINE_LURAPH_UNFLATTEN, path, out_path]
+            try:
+                self.proc = subprocess.Popen(cmd, cwd=PYENGINE_LURAPH_DIR, stdout=subprocess.PIPE,
+                                             stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
+            except Exception as e:
+                self.q.put(f"could not launch the un-flattener on {path}: {e}")
+                continue
+            self.q.put(f"-- cleaning {os.path.basename(path)} --")
+            for line in self.proc.stdout:
+                self.q.put(line.rstrip("\n"))
+            self.proc.wait()
+            self.proc = None
+            if os.path.isfile(out_path):
+                last_out_path = out_path
+            self.q.put("")
+
+        if last_out_path:
+            self.q.put("cleaned output (deepest/last file processed): " + last_out_path)
+            try:
+                os.startfile(last_out_path)
+            except Exception:
+                pass
+        else:
+            self.q.put("no cleaned file produced - see log above")
+        self.q.put("done")
+        self.q.put("")
+        self.q.put(self.STOP_BUSY)
 
     def _run_deobfuscator(self, path, engine_script, engine_cwd, label):
         cmd = [sys.executable, engine_script, path, OUTPUT_DIR]
@@ -493,22 +701,40 @@ class App:
                                          stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
         except Exception as e:
             self.q.put("could not launch deobfuscator: " + str(e))
+            self.q.put(self.STOP_BUSY)
             return
+        final_path = None
         for line in self.proc.stdout:
-            self.q.put(line.rstrip("\n"))
+            line = line.rstrip("\n")
+            self.q.put(line)
+            if line.startswith("FINAL_DEOBF_PATH --> "):
+                final_path = line.split("FINAL_DEOBF_PATH --> ", 1)[1].strip()
         self.proc.wait()
         self.proc = None
 
         base = os.path.join(OUTPUT_DIR, os.path.basename(path))
-        deobf_path = base + ".deobf.lua"
-        report_path = base + ".report.txt"
+        deobf_path = final_path or (base + ".deobf.lua")
+        report_path = deobf_path.replace(".deobf.lua", ".report.txt")
+        readable_path = deobf_path.replace(".deobf.lua", ".readable.lua")
         self.q.put("")
         if os.path.isfile(deobf_path):
             self.q.put("deobfuscated output: " + deobf_path)
             if os.path.isfile(report_path):
                 self.q.put("full trace report: " + report_path)
+            open_path = deobf_path
+            if os.path.isfile(readable_path):
+                try:
+                    trivial = os.path.getsize(deobf_path) < 200
+                except OSError:
+                    trivial = False
+                if trivial:
+                    self.q.put("deobfuscated output is near-empty (nothing observable was traced) -- "
+                                "opening the readable annotated source instead: " + readable_path)
+                    open_path = readable_path
+                else:
+                    self.q.put("readable annotated source: " + readable_path)
             try:
-                os.startfile(deobf_path)
+                os.startfile(open_path)
             except Exception:
                 pass
         else:
@@ -516,6 +742,7 @@ class App:
                         f"(this engine targets {label} obfuscation)")
         self.q.put("done")
         self.q.put("")
+        self.q.put(self.STOP_BUSY)
 
     def spawn_console(self, cmd):
         flags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0

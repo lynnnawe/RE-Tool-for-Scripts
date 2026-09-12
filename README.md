@@ -23,15 +23,16 @@ hookfunction/replaceclosure/detour, getgc/get_gc_objects,
 setreadonly/make_writeable, WebSocket/syn.websocket, and more). Local runs let
 you optionally prepend a loader file, then the chosen prelude, then your target
 
-## Deobfuscator
-
-- Wearedevs
-- MoonsecV3
-- luarmor next trusttrusttrust
-  
 ## Config fields
 
 - Target script: the file under analysis
 - Optional loader/prelude to prepend (local runs)
-- script_key / Live loader URL: for instrument live mode
+- script_key / Live loader URL: for instrument live mode; emulate roblox also
+  fetches this URL as its target source when set (falls back to the target
+  field otherwise)
 - run secs / out dir: capture window and executor output folder
+- exec name / agent: fake identifyexecutor()/getexecutorname() identity used
+  by emulate roblox (defaults to Synapse X / 2.0.0). When emulate fetches the
+  url field, `agent` (falling back to `exec name`) is also sent as the
+  request's `User-Agent` header, for loaders that gate on it (a common
+  pattern: `Headers={["User-Agent"]="Eclipse"}`)

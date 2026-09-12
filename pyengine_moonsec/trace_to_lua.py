@@ -301,23 +301,10 @@ def parse_trace(report_file):
             operations.append({"type": "loadstring", "raw": line, "depth": len(closure_stack)})
 
         elif line.startswith("LOADSTRING BOOTSTRAP -->"):
-            # A hand-crafted, already-correct `local loadstring_result_N =
-            # (...)()` statement from moonsec_deobfuscator.py -- either the
-            # literal loadstring() source it captured, or (the common "hub
-            # script" pattern) a real `loadstring(game:HttpGet(url))()`
-            # bootstrap. It must be spliced in verbatim: running it through
-            # process_call_line's identifier-chain regex would mis-parse the
-            # embedded parens/colons/quotes in that expression.
             code = line.split("LOADSTRING BOOTSTRAP -->")[1].strip()
             operations.append({"type": "loadstring_bootstrap", "raw": code, "depth": len(closure_stack)})
 
         elif line.startswith("RUNTIME_ERROR -->") or line.startswith("TRACEBACK -->"):
-            # The sandbox caught this deep inside the target's own code (see
-            # the xpcall wrapper in moonsec_deobfuscator.py) rather than
-            # crashing the whole process, so whatever trace exists above is
-            # real and complete up to this point -- it's just where emulation
-            # had to stop. Recorded as trailing comments, never as executable
-            # code, since the message text is arbitrary and not Lua.
             diagnostics.append(line)
 
     lua_lines = []
@@ -343,10 +330,6 @@ def parse_trace(report_file):
         lua_lines.append("end")
         lua_lines.append("")
 
-        # Find where the collapsed portion actually ends in `operations`
-        # (not `top_level_calls`) so whatever comes after the repeated
-        # pattern -- there's often real code following a decode/setup loop
-        # like this -- still gets emitted below instead of silently dropped.
         collapsed_call_target = pattern_len * repeat_count
         depth0_calls_seen = 0
         split_idx = len(operations)
@@ -432,12 +415,6 @@ def parse_trace(report_file):
 
             i += 1
 
-        # A trace can end mid-closure -- the sandbox hit a runtime error or
-        # was killed by the execution timeout while inside a callback, so no
-        # matching "--- EXITING CLOSURE ---" line was ever recorded. Without
-        # this, every "local function callback(...)" opened above would be
-        # left without its closing "end", producing a file that can't even
-        # parse. Close out whatever is still open, innermost first.
         while closure_info_stack:
             close_str = closure_info_stack.pop()
             indent_inner = "    " * len(closure_info_stack)
@@ -619,12 +596,6 @@ def postprocess_output(output):
         if stripped == "" and prev_line.strip() == "":
             continue
 
-        # Defense in depth: the sandbox now emits valid Lua literals for
-        # every value it stringifies (see recursive_tostring in
-        # moonsec_deobfuscator.py), but non-literal "type: 0xADDRESS" reprs
-        # (from Luau's own bare tostring()) are exactly the shape of thing
-        # that breaks generated Lua outright if one ever slips through, so
-        # any that do are still swapped for a syntactically valid stand-in.
         line = re.sub(r'\bfunction:\s*(?:0x)?[0-9a-fA-F]{4,}', 'function(...) end', line)
         line = re.sub(r'\btable:\s*(?:0x)?[0-9a-fA-F]{4,}', '{}', line)
         line = re.sub(r'\b(?:userdata|thread):\s*(?:0x)?[0-9a-fA-F]{4,}', 'nil', line)

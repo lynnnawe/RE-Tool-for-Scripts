@@ -1,3 +1,6 @@
+local EXECUTOR_NAME = EXECUTOR_NAME or "Synapse X"
+local EXECUTOR_AGENT = EXECUTOR_AGENT or "2.0.0"
+
 local realprint, realtype, realtostring = print, type, tostring
 local sformat, sgsub, sbyte, srep, ssub = string.format, string.gsub, string.byte, string.rep, string.sub
 local floor, sqrt, min, max, abs = math.floor, math.sqrt, math.min, math.max, math.abs
@@ -24,8 +27,8 @@ local function log(msg)
     realprint(PAD)
 end
 
-local F = setmetatable({}, { __mode = "k" })   -- proxy -> fields
-local T = setmetatable({}, { __mode = "k" })   -- proxy -> Roblox type name
+local F = setmetatable({}, { __mode = "k" })
+local T = setmetatable({}, { __mode = "k" })
 
 local function object(tname, meta, init)
     local p = newproxy(true)
@@ -467,7 +470,7 @@ instmeta.__index = function(self, k)
             for _, c in ipairs(f.children) do
                 if F[c].name == name then return c end
             end
-            return makeInstance(name, self)   -- must not return nil or the VM stalls
+            return makeInstance(name, self)
         end
     end
     if k == "Clone" then
@@ -673,8 +676,8 @@ local EMU = {
     iscclosure = function(f) return dbginfo(f, "s") == "[C]" end,
     islclosure = function(f) return dbginfo(f, "s") ~= "[C]" end,
     isexecutorclosure = function() return false end,
-    identifyexecutor = function() return "Synapse X", "2.0.0" end,
-    getexecutorname = function() return "Synapse X" end,
+    identifyexecutor = function() return EXECUTOR_NAME, EXECUTOR_AGENT end,
+    getexecutorname = function() return EXECUTOR_NAME end,
     checkcaller = function() return true end,
     setreadonly = function() end,
     isreadonly = function() return false end,
@@ -714,13 +717,16 @@ setmetatable(G, {
     end,
 })
 
+local HOOK_MAX_LEN = 8192
 local function hook_loader(fn, nm)
     if realtype(fn) ~= "function" then return fn end
     return function(chunk, ...)
         if realtype(chunk) == "string" then
             realprint(srep("=", 70))
             realprint(sformat("[%s] %d bytes:", nm, #chunk))
-            realprint(chunk)
+            for i = 1, #chunk, HOOK_MAX_LEN do
+                realprint(ssub(chunk, i, i + HOOK_MAX_LEN - 1))
+            end
             realprint(srep("=", 70))
             realprint(PAD)
         end

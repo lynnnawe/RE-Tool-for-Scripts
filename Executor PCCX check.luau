@@ -1,4 +1,3 @@
---!nonstrict
 local ECHO_TEST = false
 local ECHO_URL  = "http://127.0.0.1:8787/audit"
 

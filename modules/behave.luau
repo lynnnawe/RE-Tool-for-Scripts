@@ -114,13 +114,16 @@ G.typeof = G.typeof or realtype
 print = function(...) log("PRINT  " .. argstr(...)) end
 warn  = function(...) log("WARN   " .. argstr(...)) end
 
+local HOOK_MAX_LEN = 8192
 local function hook_loader(fn, nm)
     if realtype(fn) ~= "function" then return fn end
     return function(chunk, ...)
         if realtype(chunk) == "string" then
             realprint(srep("=", 70))
             realprint(sformat("[%s] %d bytes:", nm, #chunk))
-            realprint(chunk)
+            for i = 1, #chunk, HOOK_MAX_LEN do
+                realprint(ssub(chunk, i, i + HOOK_MAX_LEN - 1))
+            end
             realprint(srep("=", 70))
             realprint("[dump-pad] " .. srep(".", 8192))
         end

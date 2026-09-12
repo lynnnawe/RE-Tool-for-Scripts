@@ -227,14 +227,6 @@ def normalize_luau_syntax(content):
 
 _configure_text_streams()
 
-# This sandbox is built and validated specifically against Luau (Roblox's
-# Lua dialect), not vanilla PUC Lua 5.1. MoonSecV3 output relies on real
-# Luau semantics -- most importantly, a genuine `_ENV` upvalue that
-# intercepts *all* bare global reads/writes throughout the chunk, which
-# vanilla Lua 5.1 does not provide (there `_ENV` is just an inert ordinary
-# variable). Running this under Lua 5.1 was tried and reliably crashed deep
-# inside the obfuscator's own custom bytecode decoder; running the exact
-# same harness under Luau lets that decoder run to completion.
 MOCK_ENV_CODE = r"""
 local real_type = type
 local real_tonumber = tonumber
@@ -738,15 +730,6 @@ def deobfuscate_file(filepath, output_dir=None):
               f"this doesn't look like a MoonSecV3-wrapped script.")
         return
 
-    # The target is run inside an xpcall boundary (rather than as bare
-    # top-level chunk code) so that a runtime error deep inside the target's
-    # own VM/anti-tamper logic -- which is common and, per real MoonSecV3
-    # samples tested against this tool, sometimes unavoidable -- doesn't just
-    # kill the luau process with an opaque stderr message. Instead it's
-    # reported as a clear, greppable trace line, and whatever ACCESSED/
-    # CALL_RESULT/SET GLOBAL trace was already captured up to that point is
-    # preserved and still gets turned into a (partial but syntactically
-    # valid) .deobf.lua rather than being lost to a bare crash.
     wrapped_target = (
         "local __ok, __err = xpcall(function(...)\n"
         + content

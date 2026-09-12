@@ -813,8 +813,6 @@ safe_globals["shared"] = MockEnv
 
     if os.path.exists(temp_file):
         os.remove(temp_file)
-    #if os.path.exists(report_file):
-    #    os.remove(report_file)
 
 def main():
     target = "obfuscated_scripts"
