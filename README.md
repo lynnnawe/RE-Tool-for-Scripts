@@ -36,3 +36,7 @@ you optionally prepend a loader file, then the chosen prelude, then your target
   url field, `agent` (falling back to `exec name`) is also sent as the
   request's `User-Agent` header, for loaders that gate on it (a common
   pattern: `Headers={["User-Agent"]="Eclipse"}`)
+
+## PS
+
+I tried reversing Luarmor but like, its fucking impossible and I will not succeed so yeah sorry!
