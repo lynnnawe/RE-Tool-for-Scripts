@@ -3,12 +3,12 @@
 Ultimate debugging / analysis tool for Roblox scripts made by Lyn <3
 
 An authorization window asks whether you own / are authorized to analyze the
-target script. Everything is gated behind it. Obviously don't click yes if you do not own the script (wink wink).
+target script. Everything is gated behind it. Obviously don't click yes if you do not own the script (wink wink idc).
 
 ## Lanes
 
 - LOCAL (runs here via luau.exe): Deobfuscate/VM dump, Emulate in fake Roblox,
-  Behavioural trace, Static lint / AST / bytecode
+  Behavioural trace, Static lint / AST and bytecode
 - EXECUTOR (paste into you're executor): Instrument & capture (stealthy), Memory scan, String-constant
   extractor, Self-audit, Parser fuzz harness
 - SERVERS: fuzz server, header echo, netwatch
